@@ -1,0 +1,8 @@
+project: 
+  title: "CSU ESS Lab_03"
+  output-dir: docs
+  type: website
+
+format: 
+  html:
+    self-contained: TRUE

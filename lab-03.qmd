@@ -1,0 +1,252 @@
+---
+title: "Lab 3: COVID-19"
+subtitle: "Ecosystem Science and Sustainability 330"
+author: 
+  name: "Archer Goodman"
+  email: "archidon@colostate.edu"
+format: html
+---
+#Question 1
+```{R}
+library(tidyverse)
+library(flextable)
+library(zoo)
+library(dplyr)
+library(ggplot2)
+Raw_Cov_Data = read.csv("https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-counties.csv")
+```
+#Question 2
+```{R}
+txt <- "2022-02-01"
+class(txt)
+
+date_example <- as.Date(txt)
+class(date_example)
+
+my.date <- as.Date("2022-02-01")
+my.state <- "Colorado"
+
+calc_covid_data <- Raw_Cov_Data |>
+  group_by(county) |>
+  arrange(county, date) |>
+  mutate(new_cases = cases - coalesce(lag(cases),0), new_deaths = deaths - coalesce(lag(deaths),0), date = as.Date(date)) |>
+  ungroup()
+
+calc_covid_data |>
+  filter(new_cases == 0) |> 
+  select(date, county, cases, new_cases) |>
+  head(20) |>
+  glimpse()
+
+sum(is.na(calc_covid_data$new_cases))
+glimpse(calc_covid_data)
+
+filter(calc_covid_data, state == my.state, date == my.date) |>
+  slice_max(cases, n = 5) |>
+  select(Date = date, County = county, Cases = cases) |>
+  flextable() |>
+  set_caption("Most Total Cases")
+
+filter(calc_covid_data, state == my.state, date == my.date) |>
+  slice_max(cases, n = 5) |>
+  select(Date = date, County = county, Cases = new_cases) |>
+  flextable() |>
+  set_caption("Most New Cases")
+
+```
+#Question 3
+```{R}
+#STEP ONE
+#Reading in Data
+pop_data <- read.csv('https://www2.census.gov/programs-surveys/popest/datasets/2020-2023/counties/totals/co-est2023-alldata.csv')
+
+
+
+#Converting state and county numeric codes into characters
+Intermediate_pop_data <- pop_data |>
+  mutate(state_code = sprintf("%02d",STATE),
+  county_code = sprintf("%03d", pop_data$COUNTY))
+
+
+
+#Combining above state and county codes into one FIP code, Removing state-level rows
+Intermediate_pop_data <- Intermediate_pop_data |>
+  filter(county_code != "000") |>
+  mutate(fips = paste(state_code, county_code, sep = ""))
+
+#Selecting only columns with the state and county names, and counties that concern the year 2021
+selected_data <- Intermediate_pop_data %>% select(contains("NAME"),
+contains("2021"),fips)
+
+#STEP TWO
+#Exploring the data
+glimpse(selected_data)
+dim(selected_data)
+colnames(selected_data)
+#the dimensions are 18 Columns by 3,144 Rows. The selected data only includes columns pertaining to the year 2021, as well as the state and county names
+
+#STEP THREE
+County_Pop <- selected_data |>
+  filter(STNAME == my.state) |>
+  pull(POPESTIMATE2021)
+County_Range <- range(County_Pop)
+print(County_Range)
+#The range of county populations has a minimum of 741 and a maximum of 737,287
+
+#STEP FOUR
+#Changing the FIPs Column from character to integer
+selected_data <- selected_data |>
+  mutate(fips = as.integer(fips))
+
+sum(calc_covid_data$new_cases)
+
+#Now join the tables
+Combined_Data <- calc_covid_data |>
+  left_join(selected_data, by = "fips")
+
+Combined_Data |>
+  filter(new_cases == 0) |> 
+  select(date, county, cases, new_cases) |>
+  head(20) |>
+  glimpse()
+
+sum(is.na(Combined_Data$POPESTIMATE2021))
+
+Combined_Calculated_Data <- Combined_Data |>
+  mutate(
+    per_cap_total_cases = cases / POPESTIMATE2021,
+    per_cap_new_cases = new_cases / POPESTIMATE2021,
+    per_cap_new_deaths = new_deaths / POPESTIMATE2021
+  )
+
+Combined_Calculated_Data |>
+  filter(new_cases == 0) |> 
+  select(date, county, cases, new_cases) |>
+  head(20) |>
+  glimpse()
+
+sum(is.na(Combined_Calculated_Data$new_cases))
+#sum(is.na(Combined_Calculated_Data$POPESTIMATE2021))
+
+my_state_data <- Combined_Calculated_Data |>
+  filter(state == my.state)
+
+#STEP FIVE
+#creating two new tables with the top five counties by cumulative and new cases, respectively
+filter(my_state_data, date == my.date) |>
+  slice_max(per_cap_total_cases, n = 5) |>
+  select(Date = date, County = county, CasesPerPerson = per_cap_total_cases) |>
+  flextable() |>
+  set_caption("Most Cumulative Cases Per Capita")
+
+filter(my_state_data, date == my.date) |>
+  slice_max(per_cap_new_cases, n = 5) |>
+  select(Date = date, County = county, NewCasesPerPerson = per_cap_new_cases) |>
+  flextable() |>
+  set_caption("Most New Cases Per Capita")
+```
+
+#Question 4
+```{R}
+#filtering data to include last 14 days
+Last_Two_Weeks <- my_state_data |>
+  filter(date >= (my.date-14), date <= my.date) |>
+  select(date, county, per_cap_total_cases, per_cap_new_cases, per_cap_new_deaths )
+
+Last_Two_Weeks <- Last_Two_Weeks |>
+  group_by(county) |>
+  summarize(Per_100k_People = (sum(per_cap_new_cases, na.rm = FALSE) * 100000))
+  
+
+Last_Two_Weeks |>
+  slice_max(Per_100k_People, n = 5) |>
+  select(County = county, NewCasesPer100kPopulation = Per_100k_People) |>
+  flextable() |>
+  set_caption("New Cases Per 100 Thousand People in the last 14 Days")
+
+Last_Two_Weeks |>
+  filter(Per_100k_People > 100) |>
+  count()
+#There are 64 counties that have more than 100 new cases per 100,000 population over the last 14 days
+
+```
+
+#Question 5
+```{R}
+Ratio_Covid_Deaths <- my_state_data |>
+  filter(year(date) == year(my.date)) |>
+  select(County = county, Cov_Deaths = deaths, Nominal_Deaths = DEATHS2021)
+
+Ratio_Covid_Deaths <- Ratio_Covid_Deaths |>
+  group_by(County) |>
+  summarize(Annum_Covid_Deaths = sum(Cov_Deaths), Annum_Nominal_Deaths = sum(Nominal_Deaths))
+
+Ratio_Covid_Deaths <- Ratio_Covid_Deaths |>
+  group_by(County) |>
+  summarize(Percent_Covid_Deaths = (Annum_Covid_Deaths / Annum_Nominal_Deaths) *100) |>
+  filter(Percent_Covid_Deaths > 20) |>
+  glimpse()
+
+Annum2021_Plot <- ggplot(data = Ratio_Covid_Deaths, 
+       aes(x = County, y = Percent_Covid_Deaths)) + 
+       geom_col(aes(fill = County)) + 
+       geom_hline(yintercept = 20) +
+       labs(title = "Percent Deaths Caused by Covid in 2021",
+            y = "Percent of all 2021 Deaths caused by Covid",
+            x = "Colorado Counties") +
+       theme_light() +
+       theme(axis.text.x = element_text(angle = 290, size = 8, vjust = -0.5),
+             legend.position = "none")
+
+Annum2021_Plot
+       
+ggsave(Annum2021_Plot, file = "img/2021_Percent_Covid_Deaths.png")
+
+       
+```
+
+#Question 6
+```{R}
+#Step ONE
+Comparison_States <- c("New York","Colorado","Alabama","Ohio")
+
+Multi_State <- Combined_Calculated_Data |>
+  filter(state == Comparison_States[1] | state == Comparison_States[2] | state == Comparison_States[3] | state == Comparison_States[4]) |>
+  group_by(date, state) |>
+  mutate(state_new_cases = sum(new_cases))
+         
+Multi_State <- Multi_State |>
+  summarize(Roll = (rollmean(state_new_cases, k = 7, fill = NA))) |>
+  ungroup()
+
+Multi_State |>
+  filter(is.na(Roll)) |> 
+  head(20) |>
+  glimpse()
+
+glimpse(Multi_State)
+
+#Step TWO
+ggplot(data = Multi_State, aes(x=date, y = Roll)) +
+  geom_line(aes(y = Roll), fill = "pink", size = 1) +
+  geom_line(aes(y = Roll), col = "darkred", size = 1) +
+  theme_linedraw() +
+  facet_wrap(~state) +
+  labs(title = "Cumulative COVID-19 Cases", x = "Date", y = "Case Count")
+
+#Step THREE
+Calc_Multi_State <- Combined_Calculated_Data |>
+  filter(state == Comparison_States[1] | state == Comparison_States[2] | state == Comparison_States[3] | state == Comparison_States[4]) |>
+  group_by(date, state) |>
+  summarize(Calc_Roll = rollmean(sum(per_cap_new_cases),7,fill = NA)) |>
+  ungroup()
+
+glimpse(Calc_Multi_State)
+
+ggplot(data = Calc_Multi_State, aes(x=date, y = Calc_Roll)) +
+  geom_line(aes(y = Calc_Roll), fill = "pink", size = 1) +
+  geom_line(aes(y = Calc_Roll), col = "darkred", size = 1) +
+  theme_linedraw() +
+  facet_wrap(~state) +
+  labs(title = "Cumulative COVID-19 Cases Per Capita", x = "Date", y = "Case Count")
+```
