@@ -8,39 +8,49 @@ format: html
 ---
 #Question 1
 ```{R}
+#loading all the libraries and reading in the raw data
 library(tidyverse)
 library(flextable)
 library(zoo)
 library(dplyr)
 library(ggplot2)
+library(maps)
+library(ggthemes)
+library(patchwork)
 Raw_Cov_Data = read.csv("https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-counties.csv")
+dim(Raw_Cov_Data)
 ```
 #Question 2
 ```{R}
+#some example code from the class website
 txt <- "2022-02-01"
 class(txt)
 
 date_example <- as.Date(txt)
 class(date_example)
 
+#setting up my date and state
 my.date <- as.Date("2022-02-01")
 my.state <- "Colorado"
 
+#cooking up the raw data just a little bit, adding new_cases and new_deaths
 calc_covid_data <- Raw_Cov_Data |>
   group_by(county) |>
   arrange(county, date) |>
   mutate(new_cases = cases - coalesce(lag(cases),0), new_deaths = deaths - coalesce(lag(deaths),0), date = as.Date(date)) |>
   ungroup()
 
-calc_covid_data |>
-  filter(new_cases == 0) |> 
-  select(date, county, cases, new_cases) |>
-  head(20) |>
-  glimpse()
+#troubleshooting
+#calc_covid_data |>
+  #filter(new_cases == 0) |> 
+  #select(date, county, cases, new_cases) |>
+  #head(20) |>
+  #glimpse()
 
-sum(is.na(calc_covid_data$new_cases))
-glimpse(calc_covid_data)
+#sum(is.na(calc_covid_data$new_cases))
+#glimpse(calc_covid_data)
 
+#making tables
 filter(calc_covid_data, state == my.state, date == my.date) |>
   slice_max(cases, n = 5) |>
   select(Date = date, County = county, Cases = cases) |>
@@ -153,17 +163,19 @@ Last_Two_Weeks <- my_state_data |>
   filter(date >= (my.date-14), date <= my.date) |>
   select(date, county, per_cap_total_cases, per_cap_new_cases, per_cap_new_deaths )
 
+#calculating the stats per 100k people
 Last_Two_Weeks <- Last_Two_Weeks |>
   group_by(county) |>
   summarize(Per_100k_People = (sum(per_cap_new_cases, na.rm = FALSE) * 100000))
   
-
+#creating a table to visualise
 Last_Two_Weeks |>
   slice_max(Per_100k_People, n = 5) |>
   select(County = county, NewCasesPer100kPopulation = Per_100k_People) |>
   flextable() |>
   set_caption("New Cases Per 100 Thousand People in the last 14 Days")
 
+#calculating the number of counties that have over 100 cases per 100k people
 Last_Two_Weeks |>
   filter(Per_100k_People > 100) |>
   count()
@@ -210,43 +222,166 @@ ggsave(Annum2021_Plot, file = "img/2021_Percent_Covid_Deaths.png")
 #Step ONE
 Comparison_States <- c("New York","Colorado","Alabama","Ohio")
 
+#filtering the county data down to just the 4 states
 Multi_State <- Combined_Calculated_Data |>
-  filter(state == Comparison_States[1] | state == Comparison_States[2] | state == Comparison_States[3] | state == Comparison_States[4]) |>
-  group_by(date, state) |>
-  mutate(state_new_cases = sum(new_cases))
-         
+  filter(state == Comparison_States[1] | state == Comparison_States[2] | state == Comparison_States[3] | state == Comparison_States[4])
+  
+
+#calculating rollmean         
 Multi_State <- Multi_State |>
-  summarize(Roll = (rollmean(state_new_cases, k = 7, fill = NA))) |>
-  ungroup()
+  group_by(date,state) |>
+  mutate(state_new_cases = sum(new_cases)) |>
+  ungroup() |>
+  mutate(Roll = (rollmean(state_new_cases, k = 7, fill = 0)))
 
-Multi_State |>
-  filter(is.na(Roll)) |> 
-  head(20) |>
-  glimpse()
+#just some troubleshooting code, now defunct
+#Multi_State |>
+  #filter(is.na(Roll)) |> 
+  #head(20) |>
+  #glimpse()
 
-glimpse(Multi_State)
+#glimpse(Multi_State)
 
 #Step TWO
+#plotting the data
 ggplot(data = Multi_State, aes(x=date, y = Roll)) +
-  geom_line(aes(y = Roll), fill = "pink", size = 1) +
+  geom_line(aes(y = Roll), col = "pink", size = 1) +
   geom_line(aes(y = Roll), col = "darkred", size = 1) +
   theme_linedraw() +
   facet_wrap(~state) +
   labs(title = "Cumulative COVID-19 Cases", x = "Date", y = "Case Count")
 
 #Step THREE
-Calc_Multi_State <- Combined_Calculated_Data |>
-  filter(state == Comparison_States[1] | state == Comparison_States[2] | state == Comparison_States[3] | state == Comparison_States[4]) |>
+#calculating the per capita new cases per day per state
+Calc_Multi_State <- Multi_State |>
   group_by(date, state) |>
-  summarize(Calc_Roll = rollmean(sum(per_cap_new_cases),7,fill = NA)) |>
+  mutate(state_per_cap_new_cases = sum(per_cap_new_cases)) |>
+  ungroup() |>
+  mutate(Calc_Roll = rollmean(state_per_cap_new_cases,7,fill = 0)) |>
   ungroup()
 
+#troubleshoot glimpse
 glimpse(Calc_Multi_State)
 
+#STEP FOUR
+#Plotting the per cap data
 ggplot(data = Calc_Multi_State, aes(x=date, y = Calc_Roll)) +
-  geom_line(aes(y = Calc_Roll), fill = "pink", size = 1) +
+  geom_line(aes(y = Calc_Roll), col = "pink", size = 1) +
   geom_line(aes(y = Calc_Roll), col = "darkred", size = 1) +
   theme_linedraw() +
   facet_wrap(~state) +
   labs(title = "Cumulative COVID-19 Cases Per Capita", x = "Date", y = "Case Count")
+
+
 ```
+#STEP FIVE
+This modification to use per capita numbers told a much better story. New York looks way better on a per capita graph because it has a huge population, so even those high raw numbers mean that the state is actually doing pretty well.
+
+#Question 7
+```{R}
+#now we're dealing with spatial data woop woop
+#can't wait to integrate R with the stuff I'm doing in ArcGIS for another class
+
+#reading in the spatial data:
+Raw_Spat_Data <- read.csv('https://raw.githubusercontent.com/mikejohnson51/csu-ess-330/refs/heads/main/resources/county-centroids.csv')
+
+#Joining it with the Raw_Cov_Data
+Spat_Combo_Data <- Raw_Spat_Data |>
+  left_join(Raw_Cov_Data, by = "fips")
+
+#troubleshooting
+sum(is.na(Spat_Combo_Data$LON))
+sum(is.na(Spat_Combo_Data$LAT))
+
+#reformatting the date column and cleaning up the NAs
+Spat_Combo_Data <- Spat_Combo_Data |>
+  #filter(fips ) |>
+  mutate(date = as.Date(date))
+
+#Troubleshooting
+#glimpse(Spat_Combo_Data)
+
+#Calculating mean coordinates
+Calc_Spat_Combo <- Spat_Combo_Data |>
+  group_by(date) |>
+  mutate(
+    X_Coord = sum(LON * cases) / sum(cases),
+    Y_Coord = sum(LAT * cases) / sum(cases), 
+    Month = paste("20", paste(format(date, "%y"),format(date, "%m"), sep = "-"), sep = "")) |>
+  ungroup()
+
+#Troubleshooting
+#glimpse(Calc_Spat_Combo)
+#sum(is.na(Calc_Spat_Combo$LON))
+#sum(is.na(Calc_Spat_Combo$LAT))
+#sum(is.na(Calc_Spat_Combo$X_Coord))
+#sum(is.na(Calc_Spat_Combo$Y_Coord))
+#sum(is.na(Calc_Spat_Combo$Month))
+
+
+ggplot(data = Calc_Spat_Combo, 
+  aes(x = X_Coord, 
+    y = Y_Coord)) +
+  borders("state", fill = "gray90", colour = "white") +
+  geom_point(aes(colour = Month, size = cases)) +
+  labs(title = "Tracking the Outbreak Through Time",
+       x = "",
+       y = "",
+       subtitle = "The average location of recorded cases",
+       caption = "Data Source: ESS 330 Class Materials",
+       color = "Month",
+       size = "Cases") +
+  ggthemes::theme_gdocs()
+```
+This graph tells an interesting story regarding the outbreak of COVID-19. The early days are spread out, sporadic, mostly in the west because that's were the first cases likely arrive from the virus' country of origin, China. But as time goes on, we get more cases, more data, and a particular pattern emerges. The more densely populated eastern half of the quickly pulls the weighted mean east to the Ohio River Valley. Then, as more and more states implement varying levels of lockdowns, the story becomes a political one. New England and SoCal, despite being VERY densely populated, believed the science and locked down tight, so the Mean's location ended up being a tug-of-war between the Deep South and Landlocked Northeast. Since the Deep South is the more populated of the two, it successfully pulls the mean into Arkansas and keeps it there as the virus takes its course.
+
+#Question 8
+```{R}
+#First, clean up the NAs in the deaths column
+Spat_Combo_Data$deaths <- Spat_Combo_Data$deaths |>
+  replace_na(0)
+
+#Calculating the X and Y Coords
+Extra_Cred_Data <- Spat_Combo_Data |>
+  group_by(date) |>
+  mutate(
+    X_Coord = sum(LON * deaths) / sum(deaths),
+    Y_Coord = sum(LAT * deaths) / sum(deaths), 
+    Month = paste("20", paste(format(date, "%y"),format(date, "%m"), sep = "-"), sep = "")) |>
+  ungroup()
+
+#troubleshoot
+#glimpse(Extra_Cred_Data)
+#sum(is.na(Extra_Cred_Data$fips))
+#sum(is.na(Extra_Cred_Data$deaths))
+#sum(is.na(Extra_Cred_Data$LON))
+#sum(is.na(Extra_Cred_Data$LAT))
+#sum(is.na(Extra_Cred_Data$X_Coord))
+#sum(is.na(Extra_Cred_Data$Y_Coord))
+
+
+Weighted_Mean_Deaths_Plot <- ggplot(data = Extra_Cred_Data, aes(x = X_Coord, y = Y_Coord)) +
+  borders("state", fill = "gray90", colour = "white") +
+  geom_point(aes(colour = "navy", size = deaths)) +
+  labs(title = "",
+       x = "",
+       y = "") +
+  ggthemes::theme_gdocs() +
+  theme(legend.position = "none")
+
+Weighted_Mean_Cases_Plot <- ggplot(data = Calc_Spat_Combo, 
+  aes(x = X_Coord, 
+    y = Y_Coord)) +
+  borders("state", fill = "gray90", colour = "white") +
+  geom_point(aes(colour = "red", size = cases)) +
+  labs(title = "Tracking the Outbreak Through Time",
+       x = "",
+       y = "") +
+  ggthemes::theme_gdocs() +
+  theme(legend.position = "none")
+
+Weighted_Mean_Cases_Plot | Weighted_Mean_Deaths_Plot
+#I'm not sure why the color isn't coming through, but at this point it's taking so long to render every time I don't wanna touch it.
+```
+
+The most notable difference in the two plots is the initial spread-out tail at the beginning of the epidemic. The cases graph has its early cases spread out across the Western Desert, while the deaths are in a much clearer line starting in the Pacific Northwest before travelling east to form the same general shape as the cases graph. This is good to note the difference, as an infected living person might travel around and spread the virus, but a dead person will not. As for the particular difference seen here, my only guess would be that the city of Las Vegas, Nevada had something to do with it. COVID-19's Patient Zero was identified in December of 2019 in China, but the outbreak in the United States started much later; Mid-March, 2020. Right on top of Spring Break, when all the college students (and perhaps some of their professors) all take a vacation to the various party cities around the country, including Las Vegas. My hypothesis is that the Spring Break Vacationers in Las Vegas during Mid-March 2020 got infected, but went back to their hometowns as they got sicker and died. 
